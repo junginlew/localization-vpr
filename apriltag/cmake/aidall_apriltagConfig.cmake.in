@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# The official AprilTag library is baked into libaidall_apriltag (linked PRIVATE
+# as static+PIC), so there is no transitive dependency to find here.
+include("${CMAKE_CURRENT_LIST_DIR}/aidall_apriltagTargets.cmake")
+
+check_required_components(aidall_apriltag)

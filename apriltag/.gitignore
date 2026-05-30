@@ -1,0 +1,27 @@
+# Build
+build/
+dist/
+*.egg-info/
+_skbuild/
+wheelhouse/
+
+# Compiled
+*.so
+*.pyd
+*.o
+*.a
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Editor / OS
+.DS_Store
+.vscode/
+compile_commands.json
+
+# Generated outputs
+detections.png

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "aidall-apriltag"
+version = "0.1.0"
+description = "A friendly Python/C++ wrapper around the official AprilTag library"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "NOTICE" }
+dependencies = ["numpy>=1.21", "pillow>=9"]
+
+[project.optional-dependencies]
+examples = ["opencv-python>=4.5"]
+print = ["reportlab>=3.6"]            # PDF sheet output
+dev = ["pytest>=7", "opencv-python>=4.5", "reportlab>=3.6", "ruff>=0.4"]
+
+[project.scripts]
+aidall-apriltag = "aidall_apriltag.cli:main"
+
+[tool.scikit-build]
+# The native module is tagged COMPONENT python in CMake; pack only that so the
+# statically-linked AprilTag headers/libs don't bloat the wheel.
+cmake.version = ">=3.18"
+wheel.packages = ["python/aidall_apriltag"]
+install.components = ["python"]
+
+[tool.scikit-build.cmake.define]
+AIDALL_APRILTAG_BUILD_PYTHON = "ON"
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+extend-exclude = ["third_party"]
+
+[tool.ruff.lint]
+# pycodestyle (E), pyflakes (F), isort (I) — formatting + import sorting.
+select = ["E", "F", "I"]

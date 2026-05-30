@@ -1,0 +1,23 @@
+---
+BasedOnStyle: Chromium
+IndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -2
+SortIncludes: true
+IncludeIsMainRegex: '(?!)'
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<(anon|assert|asistd|bits|bluetooth|complex|cpio|ctype|curl|dlfcn|errno|execinfo|fcntl|fenv|float|fmt|ftw|glob|grp|iconv|inttypes|iso646|limits|locale|llvm|math|monetary|net|netdb|netinet|news|nlist|poll|pthread|pwd|regex|sched|semaphore|signal|stdarg|stdbool|stddef|stdint|stdio|stdlib|string|stropts|sys|sysexits|termios|tgmath|thread|time|uchar|ulimit|unistd|utime|utmpx|wchar|wctype|xlocale|zlib)\.h>'
+    Priority: 0
+  - Regex: '^<(c(assert|ctype|errno|fenv|float|inttypes|iso646|limits|locale|math|setjmp|signal|stdarg|stdbool|stddef|stdint|stdio|stdlib|string|tgmath|time|uchar|wctype)|algorithm|any|array|atomic|barrier|bit|bitset|chrono|clocale|cmath|compare|complex|concepts|condition_variable|coroutine|deque|exception|execution|filesystem|forward_list|fstream|functional|future|initializer_list|iomanip|ios|iosfwd|iostream|istream|iterator|latch|limits|list|locale|map|memory|memory_resource|mutex|new|numeric|optional|ostream|queue|random|ranges|ratio|regex|scoped_allocator|set|shared_mutex|span|sstream|stack|stdexcept|streambuf|string|string_view|strstream|system_error|thread|tuple|type_traits|typeindex|typeinfo|unordered_map|unordered_set|utility|variant|vector)>'
+    Priority: 1
+  - Regex: '^"(aidall_apriltag)/.*"'
+    Priority: 2
+  - Regex: '.*'
+    Priority: 3
+
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: true
+  AlignFunctionPointers: false
