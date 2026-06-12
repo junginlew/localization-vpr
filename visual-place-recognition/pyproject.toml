@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vpr"
+version = "0.1.0"
+description = "Visual place recognition + 6-DoF relocalization pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "h5py",
+]
+
+[tool.setuptools]
+packages = ["vpr", "vpr.datasets"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
