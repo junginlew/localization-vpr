@@ -4,7 +4,8 @@ import numpy as np
 
 from vpr.geometry import make_se3
 
-MIN_PNP_POINTS = 15  # PnP 입력 3D-2D 대응 하한 (이 미만이면 측위 실패)
+MIN_PNP_POINTS = 15            # PnP 입력 3D-2D 대응 하한 (이 미만이면 측위 실패)
+MIN_ESSENTIAL_INLIERS = 30     # 에피폴라 검증 인라이어 하한 (이 미만 후보는 장소 오인식으로 폐기)
 
 
 def build_index(global_descs):
@@ -23,6 +24,36 @@ def search_topk(index, query_desc, k):
     q = np.ascontiguousarray(query_desc, dtype=np.float32).reshape(1, -1)
     scores, indices = index.search(q, k)
     return indices[0], scores[0]
+
+
+def verify_essential(query_pts, kf_pts, K, min_inliers=MIN_ESSENTIAL_INLIERS, ransac_thresh=1.0):
+    """매칭된 쿼리·키프레임 2D 점쌍을 essential matrix RANSAC으로 검증해 에피폴라 인라이어 인덱스를 반환한다."""
+    query_pts = np.ascontiguousarray(query_pts, dtype=np.float64)
+    kf_pts = np.ascontiguousarray(kf_pts, dtype=np.float64)
+    if len(query_pts) < min_inliers:  # 매칭 자체가 임계보다 적으면 폐기
+        return None
+
+    E, mask = cv2.findEssentialMat(
+        query_pts, kf_pts, np.asarray(K, dtype=np.float64),
+        method=cv2.RANSAC, prob=0.999, threshold=ransac_thresh,
+    )
+    if E is None or mask is None:
+        return None
+    inliers = np.flatnonzero(mask.ravel())  # mask는 (N,1) 0/1 → 인라이어 행 번호 배열
+    if len(inliers) < min_inliers:
+        return None
+    return inliers
+
+
+def select_candidate(candidate_matches, K, min_inliers=MIN_ESSENTIAL_INLIERS):
+    """Top-K 후보별 (쿼리 2D, 키프레임 2D) 매칭에서 에피폴라 인라이어가 가장 많은 후보를 고른다."""
+    best_idx = None
+    best_count = 0
+    for i, (query_pts, kf_pts) in enumerate(candidate_matches):
+        inliers = verify_essential(query_pts, kf_pts, K, min_inliers)
+        if inliers is not None and len(inliers) > best_count:
+            best_idx, best_count = i, len(inliers)
+    return best_idx
 
 
 def estimate_pose(points3d, points2d, K, reproj_err=4.0, min_points=MIN_PNP_POINTS):
