@@ -78,3 +78,37 @@ def estimate_pose(points3d, points2d, K, reproj_err=4.0, min_points=MIN_PNP_POIN
     R_wc = R_cw.T
     t_wc = (-R_wc @ tvec).ravel()
     return make_se3(R_wc, t_wc), inliers.ravel()  # T_world_cam (4,4), 인라이어 인덱스
+
+
+def localize_query(query_image, keyframes, index, K, image_size,
+                   global_extractor, local_extractor, matcher, top_k=10):
+    """쿼리 이미지 한 장에서 6-DoF 포즈 T_world_cam 추정.
+
+    검색(Top-K) → 후보별 로컬 매칭 → 에피폴라 검증·후보 선택 → 확정 후보의 3D-2D로 PnP.
+    """
+    query_global = global_extractor(query_image)
+    query_kp, query_desc = local_extractor(query_image)
+
+    cand_ids, _ = search_topk(index, query_global, top_k)
+
+    candidate_matches = []  # (쿼리 2D, 키프레임 2D)
+    matched = []            # 후보별 (키프레임 번호, 매칭 인덱스쌍)
+    for kf_i in cand_ids:
+        if kf_i < 0:        # faiss는 키프레임이 k보다 적으면 -1로 채움
+            continue
+        kf = keyframes[kf_i]
+        idx = matcher(query_kp, query_desc, kf.keypoints, kf.local_desc, image_size)
+        candidate_matches.append((query_kp[idx[:, 0]], kf.keypoints[idx[:, 1]]))
+        matched.append((kf_i, idx))
+
+    best = select_candidate(candidate_matches, K)
+    if best is None:        # 모든 후보가 에피폴라 검증에서 폐기 → 측위 실패
+        return None
+
+    kf_i, idx = matched[best]
+    kf = keyframes[kf_i]
+    points3d = kf.points3d[idx[:, 1]]      # 매칭된 키프레임 키포인트의 월드 3D
+    points2d = query_kp[idx[:, 0]]         # 그에 대응하는 쿼리 2D
+    valid = ~np.isnan(points3d).any(axis=1)  # 삼각측량 실패(NaN) 키포인트 제외
+    T_world_cam, _ = estimate_pose(points3d[valid], points2d[valid], K)
+    return T_world_cam

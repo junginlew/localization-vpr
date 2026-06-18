@@ -54,3 +54,28 @@ class LocalExtractor:
         t = torch.from_numpy(rgb).permute(2, 0, 1).float().unsqueeze(0)
         out = self.model.detectAndCompute(t)[0]
         return out["keypoints"].cpu().numpy(), out["descriptors"].cpu().numpy()
+
+
+class LocalMatcher:
+    """XFeat LighterGlue 매칭기. 두 피처 집합의 매칭 인덱스쌍 (M, 2) [집합0 번호, 집합1 번호]를 반환."""
+
+    def __init__(self, min_conf=0.1, device=_DEVICE):
+        self.model = torch.hub.load(
+            "verlab/accelerated_features", "XFeat", pretrained=True, trust_repo=True,
+        )
+        self.device = device
+        self.min_conf = min_conf
+
+    @torch.no_grad()
+    def __call__(self, kp0, desc0, kp1, desc1, image_size):
+        d0 = self._pack(kp0, desc0, image_size)
+        d1 = self._pack(kp1, desc1, image_size)
+        _, _, idx = self.model.match_lighterglue(d0, d1, min_conf=self.min_conf)
+        return idx  # (M, 2): kp0/kp1에서의 매칭 인덱스
+
+    def _pack(self, keypoints, descriptors, image_size):
+        return {
+            "keypoints": torch.as_tensor(keypoints, dtype=torch.float32, device=self.device),
+            "descriptors": torch.as_tensor(descriptors, dtype=torch.float32, device=self.device),
+            "image_size": image_size,  # (Width, Height)
+        }

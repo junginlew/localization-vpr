@@ -12,6 +12,9 @@ dependencies = [
     "opencv-python",
     "h5py",
     "faiss-cpu",
+    "torch",
+    "pycolmap>=3.13",
+    "kornia",
 ]
 
 [tool.setuptools]
