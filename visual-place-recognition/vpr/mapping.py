@@ -1,7 +1,10 @@
 import os
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")  # COLMAP faiss CPU 매처의 OpenBLAS 스레드 충돌(segfault) 회피
 
+import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import cv2
@@ -18,50 +21,48 @@ MIN_STEREO_DEPTH = 0.5            # m, 너무 가깝거나 음수 깊이(삼각�
 MAX_STEREO_DEPTH = 50.0           # m, 30cm baseline에선 원거리 깊이 신뢰도 급락
 
 
-def _setup_image_dir(work, frames):
-    """선택 프레임의 cam0/cam1 이미지를 work/images/{cam}/{타임스탬프}.png 심볼릭으로 모은다."""
+def _setup_image_dir(work, image_pairs):
+    """(timestamp, cam0_path, cam1_path) 목록을 work/images/{cam}/{타임스탬프}.png 심볼릭으로 모은다."""
     img_dir = work / "images"
     if img_dir.exists():
         shutil.rmtree(img_dir)
-    for cam, attr in (("cam0", "cam0_path"), ("cam1", "cam1_path")):
-        (img_dir / cam).mkdir(parents=True)
-        for f in frames:
-            link = img_dir / cam / f"{f.timestamp}.png"
-            link.symlink_to(Path(getattr(f, attr)).resolve())
+    (img_dir / "cam0").mkdir(parents=True)
+    (img_dir / "cam1").mkdir(parents=True)
+    for ts, p0, p1 in image_pairs:
+        (img_dir / "cam0" / f"{ts}.png").symlink_to(Path(p0).resolve())
+        (img_dir / "cam1" / f"{ts}.png").symlink_to(Path(p1).resolve())
     return img_dir
 
 
-def _rig_config(calib):
+def _rig_config(baseline):
     """cam0=기준 센서, cam1=baseline만큼 떨어진 고정 상대 포즈 (스케일을 메트릭으로 고정)."""
     cam0 = pc.RigConfigCamera(ref_sensor=True, image_prefix="cam0/")
-    cam1_from_cam0 = pc.Rigid3d(np.array([[1.0, 0, 0, -calib.baseline],
+    cam1_from_cam0 = pc.Rigid3d(np.array([[1.0, 0, 0, -baseline],
                                           [0, 1.0, 0, 0],
                                           [0, 0, 1.0, 0]]))
     cam1 = pc.RigConfigCamera(ref_sensor=False, image_prefix="cam1/", cam_from_rig=cam1_from_cam0)
     return pc.RigConfig(cameras=[cam0, cam1])
 
 
-def run_sfm(frames, calib, work_dir, init_min_tri_angle=INIT_MIN_TRI_ANGLE):
-    """선택 프레임의 스테레오 이미지로 rig 제약 SfM을 돌려 메트릭 reconstruction을 반환한다.
+def _run_colmap(work, image_pairs, fx, fy, cx, cy, baseline, init_min_tri_angle):
+    """rig 제약 COLMAP SfM. 가장 많이 등록된 모델을 work/model에 쓰고 그 reconstruction을 반환한다.
 
-    GT 포즈는 사용안함(평가 전용 격리) - 입력 frames에서 이미지 경로만 사용.
+    이 함수는 torch·faiss-cpu가 없는 별도 프로세스(sfm_worker)에서 호출된다 — faiss 이중 로드로 인한
+    매칭 중 힙 손상을 피하기 위함(report.md의 미해결 문제 항목 참조).
     """
-    work = Path(work_dir)
-    work.mkdir(parents=True, exist_ok=True)
-    img_dir = _setup_image_dir(work, frames)
+    img_dir = _setup_image_dir(work, image_pairs)
 
     db_path = work / "database.db"
     if db_path.exists():
         db_path.unlink()
     reader = pc.ImageReaderOptions()
     reader.camera_model = "PINHOLE"
-    fx, fy, cx, cy = calib.K[0, 0], calib.K[1, 1], calib.K[0, 2], calib.K[1, 2]
     reader.camera_params = f"{fx},{fy},{cx},{cy}"
     pc.extract_features(db_path, img_dir, camera_mode=pc.CameraMode.PER_FOLDER, reader_options=reader)
     pc.match_exhaustive(db_path)
 
     db = pc.Database.open(str(db_path))           # cam0-cam1을 30cm 고정 rig으로 묶어 메트릭 스케일 확보
-    pc.apply_rig_config([_rig_config(calib)], db)
+    pc.apply_rig_config([_rig_config(baseline)], db)
     db.close()
 
     out = work / "sparse"
@@ -73,7 +74,56 @@ def run_sfm(frames, calib, work_dir, init_min_tri_angle=INIT_MIN_TRI_ANGLE):
     recs = pc.incremental_mapping(db_path, img_dir, out, options=opt)
     if not recs:
         return None
-    return max(recs.values(), key=lambda r: r.num_reg_images())  # 가장 많이 등록된 모델 채택
+    best = max(recs.values(), key=lambda r: r.num_reg_images())  # 가장 많이 등록된 모델 채택
+    model_dir = work / "model"
+    if model_dir.exists():
+        shutil.rmtree(model_dir)
+    model_dir.mkdir(parents=True)
+    best.write(str(model_dir))
+    return best
+
+
+def run_colmap_from_manifest(work_dir):
+    """work_dir/manifest.json을 읽어 _run_colmap을 실행하는 워커 진입점. 성공 0, 재구성 실패 2."""
+    work = Path(work_dir)
+    m = json.loads((work / "manifest.json").read_text())
+    rec = _run_colmap(work, m["image_pairs"], m["fx"], m["fy"], m["cx"], m["cy"],
+                      m["baseline"], m["init_min_tri_angle"])
+    return 0 if rec is not None else 2
+
+
+def run_sfm(frames, calib, work_dir, init_min_tri_angle=INIT_MIN_TRI_ANGLE):
+    """선택 프레임의 스테레오 이미지로 rig 제약 SfM을 돌려 메트릭 reconstruction을 반환한다.
+
+    COLMAP 매칭은 sfm_worker 서브프로세스에서 실행한다(faiss 이중 로드 회피). 여기서는 manifest를
+    써주고, 워커가 끝나면 디스크의 model을 읽어 반환할 뿐이다(읽기는 faiss를 안 써 안전).
+    GT 포즈는 사용 안 함(평가 전용 격리) - 입력 frames에서 이미지 경로만 사용.
+    """
+    work = Path(work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "image_pairs": [[f.timestamp, str(Path(f.cam0_path).resolve()), str(Path(f.cam1_path).resolve())]
+                        for f in frames],
+        "fx": float(calib.K[0, 0]), "fy": float(calib.K[1, 1]),
+        "cx": float(calib.K[0, 2]), "cy": float(calib.K[1, 2]),
+        "baseline": float(calib.baseline),
+        "init_min_tri_angle": float(init_min_tri_angle),
+    }
+    (work / "manifest.json").write_text(json.dumps(manifest))
+
+    # 워커는 pycolmap만 import하는 깨끗한 프로세스. COLMAP 매처의 OpenBLAS가 멀티스레드에서 간헐적
+    # 힙 손상(BLAS Bad memory unallocation)을 일으켜, 결정적 안정성을 위해 단일 스레드로 고정한다.
+    env = os.environ.copy()
+    for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        env[_v] = "1"
+    worker = Path(__file__).resolve().parent.parent / "scripts" / "sfm_worker.py"
+    result = subprocess.run([sys.executable, str(worker), str(work)], env=env)
+
+    model_dir = work / "model"
+    if result.returncode != 0 or not model_dir.exists():
+        return None
+    return pc.Reconstruction(str(model_dir))
 
 
 def _to_se3(rigid):
