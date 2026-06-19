@@ -1,0 +1,31 @@
+# VPR 파이프라인 기본 파라미터. evaluate.py가 읽어 매핑/측위 함수에 넘긴다.
+
+data_root: data/4seasons     # 4Seasons 레코딩들이 들어있는 폴더
+
+courses:                     # 평가할 코스. 코스당 map 레코딩으로 지도, query 레코딩으로 측위
+  - office_loop
+  - parking_garage
+
+mapping:
+  sfm_frame_stride: 10            # 지도용 프레임을 몇 장에 1장씩 쓸지 (클수록 SfM 가벼움)
+  init_min_tri_angle: 2.0         # SfM 초기화 최소 삼각측량 각도 (deg)
+  min_keyframe_translation: 2.0   # 키프레임 채택 이동 간격 (m)
+  min_keyframe_rotation_deg: 15.0 # 키프레임 채택 회전 간격 (deg)
+  min_stereo_depth: 0.5           # 지도 3D점 허용 최소 깊이 (m)
+  max_stereo_depth: 50.0          # 지도 3D점 허용 최대 깊이 (m)
+
+localize:
+  top_k: 10                  # 검색에서 가져올 후보 키프레임 수
+  min_essential_inliers: 30  # 장소 인정 최소 에피폴라 인라이어 수 (미만이면 후보 폐기)
+  min_pnp_points: 15         # 포즈 추정 최소 3D-2D 대응 수 (미만이면 측위 실패)
+  match_min_conf: 0.1        # LighterGlue 매칭 신뢰도 하한 (0~1)
+
+eval:
+  query_stride: 20           # 쿼리를 몇 장에 1장씩 평가할지 (클수록 빠름)
+  recall_gt_dist: 5.0        # 후보를 정답 장소로 인정하는 GT 거리 (m)
+  scale_gate: 0.01           # 스케일 오차 |s-1| 경고 임계
+  recall_ks: [1, 5, 10]      # Recall@K 의 K
+  success_thresholds:        # 측위 성공 판정 (위치 m, 회전 deg)
+    - [0.1, 1.0]
+    - [0.25, 2.0]
+    - [1.0, 5.0]

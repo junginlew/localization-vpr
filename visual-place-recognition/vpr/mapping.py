@@ -41,7 +41,7 @@ def _rig_config(calib):
     return pc.RigConfig(cameras=[cam0, cam1])
 
 
-def run_sfm(frames, calib, work_dir):
+def run_sfm(frames, calib, work_dir, init_min_tri_angle=INIT_MIN_TRI_ANGLE):
     """선택 프레임의 스테레오 이미지로 rig 제약 SfM을 돌려 메트릭 reconstruction을 반환한다.
 
     GT 포즈는 사용안함(평가 전용 격리) - 입력 frames에서 이미지 경로만 사용.
@@ -69,7 +69,7 @@ def run_sfm(frames, calib, work_dir):
         shutil.rmtree(out)
     out.mkdir(parents=True)
     opt = pc.IncrementalPipelineOptions()
-    opt.mapper.init_min_tri_angle = INIT_MIN_TRI_ANGLE
+    opt.mapper.init_min_tri_angle = init_min_tri_angle
     recs = pc.incremental_mapping(db_path, img_dir, out, options=opt)
     if not recs:
         return None
@@ -92,10 +92,10 @@ def select_keyframes(reconstruction, min_translation=MIN_KEYFRAME_TRANSLATION,
     cam0 = []
     for img in reconstruction.images.values():
         cam, fname = img.name.split("/")
-        if cam != "cam0":
+        if cam != "cam0" or not img.has_pose:
             continue
         ts = int(fname[:-4])  # timestamp.png
-        T_world_cam0 = _to_se3(img.cam_from_world.inverse())
+        T_world_cam0 = _to_se3(img.cam_from_world().inverse())
         cam0.append((ts, T_world_cam0))
     cam0.sort(key=lambda e: e[0]) # 타임스탬프 순
 
@@ -133,7 +133,8 @@ def triangulate_stereo(pts0, pts1, K, baseline):
     return (pts4d[:3] / pts4d[3]).T       # 동차좌표 (4,N) → (N,3)
 
 
-def triangulate_keyframe(cam0_path, cam1_path, T_world_cam0, calib, extractor):
+def triangulate_keyframe(cam0_path, cam1_path, T_world_cam0, calib, extractor,
+                         min_depth=MIN_STEREO_DEPTH, max_depth=MAX_STEREO_DEPTH):
     """키프레임의 cam0 키포인트마다 cam0↔cam1 스테레오 삼각측량으로 월드 3D를 만든다."""
     kp0, desc0 = extractor(cam0_path)
     kp1, desc1 = extractor(cam1_path)
@@ -143,28 +144,33 @@ def triangulate_keyframe(cam0_path, cam1_path, T_world_cam0, calib, extractor):
     if len(matches):
         cam_pts = triangulate_stereo(kp0[matches[:, 0]], kp1[matches[:, 1]], calib.K, calib.baseline)
         depth = cam_pts[:, 2]
-        ok = (depth > MIN_STEREO_DEPTH) & (depth < MAX_STEREO_DEPTH)  # 음수·너무 가깝거나 먼 깊이 제외
+        ok = (depth > min_depth) & (depth < max_depth)  # 음수·너무 가깝거나 먼 깊이 제외
         world_pts = apply_se3(T_world_cam0, cam_pts)                  # cam0 좌표 → 월드
         points3d[matches[ok, 0]] = world_pts[ok]
     return kp0, desc0, points3d # keypoints (N,2), local_desc (N,D), points3d (N,3)
 
 
-def build_map(frames, calib, work_dir, out_path, global_extractor, local_extractor):
+def build_map(frames, calib, work_dir, out_path, global_extractor, local_extractor,
+              init_min_tri_angle=INIT_MIN_TRI_ANGLE,
+              min_keyframe_translation=MIN_KEYFRAME_TRANSLATION,
+              min_keyframe_rotation_deg=MIN_KEYFRAME_ROTATION_DEG,
+              min_stereo_depth=MIN_STEREO_DEPTH, max_stereo_depth=MAX_STEREO_DEPTH):
     """프레임 시퀀스로 지도를 만들어 파일로 저장한다.
 
     SfM으로 포즈 복원 → 키프레임 선별 → 키프레임마다 전역 desc + 로컬 desc + 3D 추출 → 저장.
     """
-    reconstruction = run_sfm(frames, calib, work_dir)
+    reconstruction = run_sfm(frames, calib, work_dir, init_min_tri_angle)
     if reconstruction is None:
         raise RuntimeError("SfM 재구성 실패: 등록된 이미지가 없음")
 
     frame_by_ts = {f.timestamp: f for f in frames}  # 키프레임 timestamp로 원본 이미지 경로를 찾음
     keyframes = []
-    for ts, T_world_cam0 in select_keyframes(reconstruction):
+    for ts, T_world_cam0 in select_keyframes(reconstruction, min_keyframe_translation, min_keyframe_rotation_deg):
         frame = frame_by_ts[ts]
         global_desc = global_extractor(frame.cam0_path)
         keypoints, local_desc, points3d = triangulate_keyframe(
-            frame.cam0_path, frame.cam1_path, T_world_cam0, calib, local_extractor)
+            frame.cam0_path, frame.cam1_path, T_world_cam0, calib, local_extractor,
+            min_stereo_depth, max_stereo_depth)
         keyframes.append(Keyframe(
             kf_id=ts,
             pose=T_world_cam0,
