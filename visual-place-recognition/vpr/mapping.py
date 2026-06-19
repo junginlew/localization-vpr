@@ -59,7 +59,12 @@ def _run_colmap(work, image_pairs, fx, fy, cx, cy, baseline, init_min_tri_angle)
     reader.camera_model = "PINHOLE"
     reader.camera_params = f"{fx},{fy},{cx},{cy}"
     pc.extract_features(db_path, img_dir, camera_mode=pc.CameraMode.PER_FOLDER, reader_options=reader)
-    pc.match_exhaustive(db_path)
+    # COLMAP 기본 CPU 매처는 faiss IVF 인덱스를 LRU 캐시에 쌓다가 대규모에서 소멸자 double-free로
+    # 죽는다. 브루트포스 매처는 IVF 인덱스를 안 만들어 그 경로를 원천 제거한다.
+    match_opts = pc.FeatureMatchingOptions()
+    match_opts.use_gpu = False
+    match_opts.sift.cpu_brute_force_matcher = True
+    pc.match_exhaustive(db_path, matching_options=match_opts)
 
     db = pc.Database.open(str(db_path))           # cam0-cam1을 30cm 고정 rig으로 묶어 메트릭 스케일 확보
     pc.apply_rig_config([_rig_config(baseline)], db)
