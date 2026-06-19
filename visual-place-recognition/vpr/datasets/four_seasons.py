@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from vpr.datasets.base import Calibration, Frame
-from vpr.geometry import make_se3, quat_to_rotmat
+from vpr.geometry import invert_se3, make_se3, quat_to_rotmat
 
 
 RECORDINGS = {
@@ -45,6 +45,11 @@ def load_transformations(path):
     return result
 
 
+def world_to_ecef(transforms):
+    """GNSSPoses의 T_world_cam(레코딩별 visual world 기준)을 ECEF로 올리는 4x4 변환."""
+    return transforms["transform_e_gpsw"] @ invert_se3(transforms["transform_w_gpsw"])
+
+
 def load_calibration(calib_dir):
     """undistorted 캘리브레이션 파싱. rectified라 좌우 동일- calib_0만 읽음."""
     calib_dir = Path(calib_dir)
@@ -70,6 +75,11 @@ class FourSeasonsSequence:
         self.calib = load_calibration(data_root / "calibration")
         self.transforms = load_transformations(self.root / "Transformations.txt")
         self._poses = load_gnss_poses(self.root / "GNSSPoses.txt")
+
+    def gt_poses_ecef(self):
+        """키프레임 timestamp → ECEF 좌표계 T_ecef_cam0. cross-season 평가용 공통 좌표계 GT."""
+        T_we = world_to_ecef(self.transforms)
+        return {f.timestamp: T_we @ f.pose for f in self.frames()}
 
     def frames(self):
         cam0 = self.root / "undistorted_images" / "cam0"
