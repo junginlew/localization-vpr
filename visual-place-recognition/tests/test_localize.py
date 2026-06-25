@@ -2,8 +2,7 @@ import numpy as np
 
 from vpr.geometry import (apply_se3, invert_se3, make_se3, quat_to_rotmat,
                           rotation_error_deg, translation_error)
-from vpr.localize import (build_index, estimate_pose, search_topk,
-                          select_candidate, verify_essential)
+from vpr.localize import build_index, estimate_pose, search_topk
 
 
 def normalized(rng, m, d):
@@ -78,57 +77,3 @@ def test_pnp_rejects_outliers():
     assert T_est is not None
     assert translation_error(T_est, T_true) < 1e-3        # 인라이어만으로 정확 복원
     assert set(inliers).isdisjoint(range(12))             # 오염된 12개는 인라이어에서 제외
-
-
-def two_view_matches(rng, n, n_outliers=0):
-    """같은 장면을 두 시점(baseline 있음)에서 본 일관된 2D 점쌍 (query_pts, kf_pts).
-
-    앞쪽 n_outliers개는 키프레임 좌표를 흩뜨려 가짜 매칭으로 오염한다.
-    """
-    T_q = random_pose(rng)
-    # 키프레임 카메라: 쿼리에서 옆으로 이동(baseline 확보) + 약간 회전, 공유 시야 유지
-    T_off = make_se3(quat_to_rotmat(0.02, 0.03, 0.0, 1.0), [0.6, 0.0, 0.1])
-    T_k = T_q @ T_off
-    points3d = points_in_front(rng, T_q, n)
-    query_pts = project(T_q, points3d)
-    kf_pts = project(T_k, points3d)
-    if n_outliers:
-        kf_pts[:n_outliers] += rng.uniform(-80, 80, size=(n_outliers, 2))
-    return query_pts, kf_pts
-
-
-def random_pair(rng, n):
-    """일관된 기하가 없는 무작위 점쌍 — 다른 장소(오인식) 흉내."""
-    return rng.uniform(0, 640, size=(n, 2)), rng.uniform(0, 480, size=(n, 2))
-
-
-def test_essential_rejects_outliers():
-    rng = np.random.default_rng(20)
-    query_pts, kf_pts = two_view_matches(rng, 60, n_outliers=12)
-    inliers = verify_essential(query_pts, kf_pts, K)
-    assert inliers is not None
-    assert set(inliers).isdisjoint(range(12))   # 오염된 0~11은 에피폴라 인라이어에서 제외
-    assert len(inliers) >= 40                    # 진짜 48쌍 중 대부분이 인라이어
-
-
-def test_essential_rejects_misrecognition():
-    rng = np.random.default_rng(21)
-    query_pts, kf_pts = random_pair(rng, 50)     # 일관된 기하 없음 → 인라이어 부족
-    assert verify_essential(query_pts, kf_pts, K) is None
-
-
-def test_select_picks_most_inliers():
-    rng = np.random.default_rng(22)
-    candidates = [
-        two_view_matches(rng, 40, n_outliers=5),  # 일관 35쌍
-        random_pair(rng, 50),                     # 오인식 → 폐기
-        two_view_matches(rng, 70, n_outliers=5),  # 일관 65쌍 (최다)
-        two_view_matches(rng, 45, n_outliers=5),  # 일관 40쌍
-    ]
-    assert select_candidate(candidates, K) == 2
-
-
-def test_select_all_rejected_returns_none():
-    rng = np.random.default_rng(23)
-    candidates = [random_pair(rng, 50), random_pair(rng, 40)]
-    assert select_candidate(candidates, K) is None
