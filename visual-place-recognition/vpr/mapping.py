@@ -19,6 +19,7 @@ MIN_KEYFRAME_TRANSLATION = 2.0    # 키프레임 선별: 직전 키프레임 대
 MIN_KEYFRAME_ROTATION_DEG = 15.0  # 키프레임 선별: 직전 키프레임 대비 회전 하한 (deg)
 MIN_STEREO_DEPTH = 0.5            # m, 너무 가깝거나 음수 깊이(삼각측량 실패) 제외
 MAX_STEREO_DEPTH = 50.0           # m, 30cm baseline에선 원거리 깊이 신뢰도 급락
+SEQUENTIAL_OVERLAP = 15           # sequential 매칭에서 각 프레임을 앞뒤 몇 장과 비교할지 (클수록 드리프트↓·비용↑)
 
 
 def _setup_image_dir(work, image_pairs):
@@ -44,7 +45,7 @@ def _rig_config(baseline):
     return pc.RigConfig(cameras=[cam0, cam1])
 
 
-def _run_colmap(work, image_pairs, fx, fy, cx, cy, baseline, init_min_tri_angle):
+def _run_colmap(work, image_pairs, fx, fy, cx, cy, baseline, init_min_tri_angle, overlap):
     """rig 제약 COLMAP SfM. 가장 많이 등록된 모델을 work/model에 쓰고 그 reconstruction을 반환한다.
 
     이 함수는 torch·faiss-cpu가 없는 별도 프로세스(sfm_worker)에서 호출된다 — faiss 이중 로드로 인한
@@ -69,7 +70,7 @@ def _run_colmap(work, image_pairs, fx, fy, cx, cy, baseline, init_min_tri_angle)
     match_opts.use_gpu = False
     match_opts.sift.cpu_brute_force_matcher = True
     pairing = pc.SequentialPairingOptions()
-    pairing.overlap = 15
+    pairing.overlap = overlap
     pairing.quadratic_overlap = True
     pairing.loop_detection = False
     pairing.expand_rig_images = True
@@ -98,11 +99,11 @@ def run_colmap_from_manifest(work_dir):
     work = Path(work_dir)
     m = json.loads((work / "manifest.json").read_text())
     rec = _run_colmap(work, m["image_pairs"], m["fx"], m["fy"], m["cx"], m["cy"],
-                      m["baseline"], m["init_min_tri_angle"])
+                      m["baseline"], m["init_min_tri_angle"], m["overlap"])
     return 0 if rec is not None else 2
 
 
-def run_sfm(frames, calib, work_dir, init_min_tri_angle=INIT_MIN_TRI_ANGLE):
+def run_sfm(frames, calib, work_dir, init_min_tri_angle=INIT_MIN_TRI_ANGLE, overlap=SEQUENTIAL_OVERLAP):
     """선택 프레임의 스테레오 이미지로 rig 제약 SfM을 돌려 메트릭 reconstruction을 반환한다.
 
     COLMAP 매칭은 sfm_worker 서브프로세스에서 실행한다(faiss 이중 로드 회피). 여기서는 manifest를
@@ -119,6 +120,7 @@ def run_sfm(frames, calib, work_dir, init_min_tri_angle=INIT_MIN_TRI_ANGLE):
         "cx": float(calib.K[0, 2]), "cy": float(calib.K[1, 2]),
         "baseline": float(calib.baseline),
         "init_min_tri_angle": float(init_min_tri_angle),
+        "overlap": int(overlap),
     }
     (work / "manifest.json").write_text(json.dumps(manifest))
 
@@ -211,7 +213,7 @@ def triangulate_keyframe(cam0_path, cam1_path, T_world_cam0, calib, extractor,
 
 
 def build_map(frames, calib, work_dir, out_path, global_extractor, local_extractor,
-              init_min_tri_angle=INIT_MIN_TRI_ANGLE,
+              init_min_tri_angle=INIT_MIN_TRI_ANGLE, sfm_overlap=SEQUENTIAL_OVERLAP,
               min_keyframe_translation=MIN_KEYFRAME_TRANSLATION,
               min_keyframe_rotation_deg=MIN_KEYFRAME_ROTATION_DEG,
               min_stereo_depth=MIN_STEREO_DEPTH, max_stereo_depth=MAX_STEREO_DEPTH):
@@ -219,7 +221,7 @@ def build_map(frames, calib, work_dir, out_path, global_extractor, local_extract
 
     SfM으로 포즈 복원 → 키프레임 선별 → 키프레임마다 전역 desc + 로컬 desc + 3D 추출 → 저장.
     """
-    reconstruction = run_sfm(frames, calib, work_dir, init_min_tri_angle)
+    reconstruction = run_sfm(frames, calib, work_dir, init_min_tri_angle, sfm_overlap)
     if reconstruction is None:
         raise RuntimeError("SfM 재구성 실패: 등록된 이미지가 없음")
 

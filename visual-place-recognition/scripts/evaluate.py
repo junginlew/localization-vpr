@@ -48,7 +48,7 @@ def evaluate_course(course, cfg, data_root, work_root, models):
     work = work_root / course
     keyframes = build_map(
         map_frames, calib, work, work / "map.h5", global_extractor, local_extractor,
-        init_min_tri_angle=m["init_min_tri_angle"],
+        init_min_tri_angle=m["init_min_tri_angle"], sfm_overlap=m["sfm_overlap"],
         min_keyframe_translation=m["min_keyframe_translation"],
         min_keyframe_rotation_deg=m["min_keyframe_rotation_deg"],
         min_stereo_depth=m["min_stereo_depth"], max_stereo_depth=m["max_stereo_depth"],
@@ -71,8 +71,7 @@ def evaluate_course(course, cfg, data_root, work_root, models):
         res = localize_query(
             q.cam0_path, keyframes, index, calib.K, image_size,
             global_extractor, local_extractor, matcher,
-            top_k=lz["top_k"], min_essential_inliers=lz["min_essential_inliers"],
-            min_pnp_points=lz["min_pnp_points"],
+            top_k=lz["top_k"], min_pnp_points=lz["min_pnp_points"],
         )
         q_center = _center(query_gt[q.timestamp])
 

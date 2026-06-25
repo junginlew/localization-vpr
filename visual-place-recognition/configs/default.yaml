@@ -8,6 +8,7 @@ courses:                     # 평가할 코스. 코스당 map 레코딩으로 �
 
 mapping:
   sfm_frame_stride: 3             # 지도용 프레임을 몇 장에 1장씩 쓸지 (작을수록 겹침↑·SfM 안정, 무거움)
+  sfm_overlap: 15                 # sequential 매칭에서 각 프레임을 앞뒤 몇 장과 비교할지 (클수록 드리프트↓·비용↑)
   init_min_tri_angle: 2.0         # SfM 초기화 최소 삼각측량 각도 (deg)
   min_keyframe_translation: 2.0   # 키프레임 채택 이동 간격 (m)
   min_keyframe_rotation_deg: 15.0 # 키프레임 채택 회전 간격 (deg)
@@ -16,7 +17,6 @@ mapping:
 
 localize:
   top_k: 10                  # 검색에서 가져올 후보 키프레임 수
-  min_essential_inliers: 30  # 장소 인정 최소 에피폴라 인라이어 수 (미만이면 후보 폐기)
   min_pnp_points: 15         # 포즈 추정 최소 3D-2D 대응 수 (미만이면 측위 실패)
   match_min_conf: 0.1        # LighterGlue 매칭 신뢰도 하한 (0~1)
 
