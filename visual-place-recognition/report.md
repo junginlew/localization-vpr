@@ -1,6 +1,5 @@
 # Visual Place Recognition 보고서
 
-(구현 진행에 따라 채워나간다. 계획은 plan.md 참조.)
 
 ## 스코프와 한계
 
