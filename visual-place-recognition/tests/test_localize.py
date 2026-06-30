@@ -61,7 +61,7 @@ def test_pnp_recovers_known_pose():
     T_true = random_pose(rng)
     points3d = points_in_front(rng, T_true, 50)
     points2d = project(T_true, points3d)
-    T_est, inliers = estimate_pose(points3d, points2d, K)
+    T_est, inliers, _ = estimate_pose(points3d, points2d, K)
     assert T_est is not None
     assert translation_error(T_est, T_true) < 1e-6
     assert rotation_error_deg(T_est, T_true) < 1e-4
@@ -73,7 +73,7 @@ def test_pnp_rejects_outliers():
     points3d = points_in_front(rng, T_true, 60)
     points2d = project(T_true, points3d)
     points2d[:12] += rng.uniform(-80, 80, size=(12, 2))  # 12개를 가짜 대응으로 오염
-    T_est, inliers = estimate_pose(points3d, points2d, K)
+    T_est, inliers, _ = estimate_pose(points3d, points2d, K)
     assert T_est is not None
     assert translation_error(T_est, T_true) < 1e-3        # 인라이어만으로 정확 복원
     assert set(inliers).isdisjoint(range(12))             # 오염된 12개는 인라이어에서 제외
